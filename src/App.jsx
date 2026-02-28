@@ -665,34 +665,55 @@ function searchStations(query) {
 }
 
 /* ═══════════════════════════════════════════════════════════
-   CLAUDE API  — images + route generation
+   CLAUDE API  — images + route generation (with cache + rate limiter)
    ═══════════════════════════════════════════════════════════ */
+const __imageCache = new Map();
+let __lastRequestTime = 0;
+const __MIN_INTERVAL = 1200;
+
+async function __rateLimitedFetch(fn) {
+  const now = Date.now();
+  const wait = Math.max(0, __MIN_INTERVAL - (now - __lastRequestTime));
+  if (wait > 0) await new Promise(r => setTimeout(r, wait));
+  __lastRequestTime = Date.now();
+  return fn();
+}
+
 async function fetchImageForPOI(poiName) {
+  if (!poiName) return null;
+  if (__imageCache.has(poiName)) return __imageCache.get(poiName);
   try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 500,
-        messages: [{
-          role: "user",
-          content: `Find a Wikimedia Commons direct image URL for "${poiName}" in Germany. Return ONLY valid JSON, no markdown: {"url":"https://upload.wikimedia.org/wikipedia/commons/...jpg","alt":"short description","credit":"photographer name"}. URL must end in .jpg, .jpeg, or .png and be a real file.`
-        }],
-        tools: [{ type: "web_search_20250305", name: "web_search" }],
-      }),
+    const result = await __rateLimitedFetch(async () => {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 500,
+          messages: [{
+            role: "user",
+            content: `Find a Wikimedia Commons direct image URL for "${poiName}" in Germany. Return ONLY valid JSON, no markdown: {"url":"https://upload.wikimedia.org/wikipedia/commons/...jpg","alt":"short description","credit":"photographer name"}. URL must end in .jpg, .jpeg, or .png and be a real file.`
+          }],
+          tools: [{ type: "web_search_20250305", name: "web_search" }],
+        }),
+      });
+      if (!response.ok) return null;
+      const data = await response.json();
+      const text = data.content?.filter(b => b.type === "text")?.map(b => b.text)?.join("")?.replace(/```json|```/g, "")?.trim();
+      if (!text) return null;
+      const parsed = JSON.parse(text);
+      return parsed?.url?.startsWith("http") ? parsed : null;
     });
-    if (!response.ok) return null;
-    const data = await response.json();
-    const text = data.content.filter(b => b.type === "text").map(b => b.text).join("").replace(/```json|```/g, "").trim();
-    if (!text) return null;
-    const parsed = JSON.parse(text);
-    return parsed.url?.startsWith("http") ? parsed : null;
-  } catch { return null; }
+    __imageCache.set(poiName, result);
+    return result;
+  } catch {
+    __imageCache.set(poiName, null);
+    return null;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -1318,72 +1339,4 @@ Include 5-8 POIs ordered geographically along the route. Include UNESCO World He
 }
 
 
-// ═══════════════════════════════════════════════════════════
-// PATCH: Claude image cache + rate limiter (prevents 429)
-// ═══════════════════════════════════════════════════════════
 
-const __imageCache = new Map();
-let __lastRequestTime = 0;
-const __MIN_INTERVAL = 1200; // ms between Claude calls
-
-async function __rateLimitedFetch(fn) {
-  const now = Date.now();
-  const wait = Math.max(0, __MIN_INTERVAL - (now - __lastRequestTime));
-  if (wait > 0) await new Promise(r => setTimeout(r, wait));
-  __lastRequestTime = Date.now();
-  return fn();
-}
-
-// Override original function (last definition wins)
-async function fetchImageForPOI(poiName) {
-  if (!poiName) return null;
-
-  if (__imageCache.has(poiName)) {
-    return __imageCache.get(poiName);
-  }
-
-  try {
-    const result = await __rateLimitedFetch(async () => {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true",
-        },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 500,
-          messages: [{
-            role: "user",
-            content: `Find a Wikimedia Commons direct image URL for "${poiName}" in Germany. Return ONLY valid JSON: {"url":"https://upload.wikimedia.org/...jpg","alt":"short description","credit":"photographer"}.`
-          }],
-          tools: [{ type: "web_search_20250305", name: "web_search" }],
-        }),
-      });
-
-      if (!response.ok) return null;
-
-      const data = await response.json();
-      const text = data.content
-        ?.filter(b => b.type === "text")
-        ?.map(b => b.text)
-        ?.join("")
-        ?.replace(/```json|```/g, "")
-        ?.trim();
-
-      if (!text) return null;
-
-      const parsed = JSON.parse(text);
-      if (parsed?.url?.startsWith("http")) return parsed;
-      return null;
-    });
-
-    __imageCache.set(poiName, result);
-    return result;
-
-  } catch {
-    __imageCache.set(poiName, null);
-    return null;
-  }
-}
