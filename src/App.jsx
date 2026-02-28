@@ -690,6 +690,7 @@ async function fetchImageForPOI(poiName) {
           "Content-Type": "application/json",
           "anthropic-version": "2023-06-01",
           "anthropic-dangerous-direct-browser-access": "true",
+          "x-api-key": "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",
         },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
@@ -1166,6 +1167,7 @@ Include 5-8 POIs ordered geographically along the route. Include UNESCO World He
           "Content-Type": "application/json",
           "anthropic-version": "2023-06-01",
           "anthropic-dangerous-direct-browser-access": "true",
+          "x-api-key": "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",
         },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
@@ -1337,6 +1339,7 @@ Include 5-8 POIs ordered geographically along the route. Include UNESCO World He
     </div>
   );
 }
+
 
 
 
