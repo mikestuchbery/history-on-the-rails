@@ -1339,7 +1339,3 @@ Include 5-8 POIs ordered geographically along the route. Include UNESCO World He
     </div>
   );
 }
-
-
-
-
